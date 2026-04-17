@@ -93,10 +93,10 @@ export default function DashboardPage() {
           <div className="ml-auto flex items-center gap-2">
             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded"
               style={{
-                background: status === "connected" ? "var(--accent-green-dim)" : "var(--accent-amber-dim)",
-                color: status === "connected" ? "var(--accent-green)" : "var(--accent-amber)",
+                background: status === "connected" ? "var(--accent-green-dim)" : status === "disconnected" ? "rgba(220,38,38,0.1)" : "var(--accent-amber-dim)",
+                color: status === "connected" ? "var(--accent-green)" : status === "disconnected" ? "#dc2626" : "var(--accent-amber)",
               }}>
-              {status === "connected" ? "● LIVE" : status === "connecting" ? "◌ CONNECTING" : "◉ DEMO"}
+              {status === "connected" ? "● LIVE" : status === "connecting" ? "◌ CONNECTING" : status === "disconnected" ? "✕ OFFLINE" : "↻ RECONNECTING"}
             </span>
             {(["Municipal", "Traffic", "Water", "Electricity", "Construction", "Emergency"] as const).map(d => {
               const count = events.filter(e => e.domain === d && e.status !== "RESOLVED").length;
