@@ -15,7 +15,7 @@ export interface PulseEvent {
   coordinates: Coordinates;
   severity_color: string;
   severity: "standard" | "high" | "critical";
-  domain: "Municipal" | "Traffic" | "Construction" | "Emergency";
+  domain: "Municipal" | "Traffic" | "Construction" | "Emergency" | "Water" | "Electricity";
   summary: string;
   assigned_officer?: Officer;
   log_message: string;

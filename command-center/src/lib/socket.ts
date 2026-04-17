@@ -37,7 +37,7 @@ function mapRealBackendDispatch(payload: Record<string, unknown>): PulseEvent {
     severity_color: severityColor,
     severity: colorToSeverity(severityColor),
     domain: ((pe.category as string) || "Municipal") as PulseEvent["domain"],
-    summary: (pe.category as string) || "New grievance event",
+    summary: (pe.summary as string) || (pe.category as string) || "New grievance event",
     assigned_officer: off ? {
       officer_id: (off.officer_id as string) || "OP-000",
       current_lat: off.current_lat as number,
@@ -144,9 +144,9 @@ export function usePulseStream(): UsePulseStreamReturn {
     if (mockIntervalRef.current) return;
     setStatus("mock");
 
-    const seed = Array.from({ length: 6 }, () => generatePulseEvent());
-    const seedLogs = seed.flatMap((e) => [generateSwarmLog(e), generateSwarmLog(e)]);
-    const seedIntake = Array.from({ length: 4 }, () => generateIntakeItem());
+    const seed = Array.from({ length: 25 }, () => generatePulseEvent());
+    const seedLogs = seed.flatMap((e) => [generateSwarmLog(e), generateSwarmLog(e), generateSwarmLog()]);
+    const seedIntake = Array.from({ length: 15 }, () => generateIntakeItem());
     setEvents(seed);
     setLogs(seedLogs);
     setIntake(seedIntake);
@@ -341,4 +341,53 @@ export function usePulseStream(): UsePulseStreamReturn {
   }, [connect, startMockMode, stopMock]);
 
   return { events, logs, intake, status };
+}
+
+// ── Trigger Analysis — call backend or seed mock ───────────────────
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const QUICK_COMPLAINTS = [
+  { desc: "Sewage overflow near Charminar residential colony", domain: "WATER" },
+  { desc: "Live wire fallen on road after storm in Gachibowli", domain: "ELECTRICITY" },
+  { desc: "Massive pothole on Road No. 12 Banjara Hills", domain: "TRAFFIC" },
+  { desc: "Garbage not collected for 5 days in Ameerpet", domain: "MUNICIPAL" },
+  { desc: "Crane operating without safety net near school", domain: "CONSTRUCTION" },
+  { desc: "Building wall cracked and leaning dangerously", domain: "EMERGENCY" },
+  { desc: "Water pipeline burst flooding entire street", domain: "WATER" },
+  { desc: "Transformer sparking and smoking in rain", domain: "ELECTRICITY" },
+  { desc: "Signal out at busy Kukatpally junction causing accidents", domain: "TRAFFIC" },
+  { desc: "Open manhole cover on main road pedestrians falling", domain: "MUNICIPAL" },
+  { desc: "Gas leak smell in Kukatpally residential area", domain: "EMERGENCY" },
+  { desc: "Night construction noise at 2am violating rules", domain: "CONSTRUCTION" },
+];
+
+export async function triggerAnalysis(): Promise<{ ok: boolean; message: string }> {
+  const complaint = QUICK_COMPLAINTS[Math.floor(Math.random() * QUICK_COMPLAINTS.length)];
+  const eventId = `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const body = {
+    event_id: eventId,
+    translated_description: complaint.desc,
+    domain: complaint.domain,
+    coordinates: {
+      lat: 17.385 + (Math.random() - 0.5) * 0.1,
+      lng: 78.4867 + (Math.random() - 0.5) * 0.1,
+    },
+  };
+
+  try {
+    const res = await fetch(`${API_URL}/api/v1/trigger-analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      return { ok: false, message: `Backend returned ${res.status}` };
+    }
+    const data = await res.json();
+    const score = data?.data?.pulse_event?.impact_score ?? "?";
+    return { ok: true, message: `Score: ${score} — ${complaint.desc.slice(0, 50)}` };
+  } catch {
+    return { ok: false, message: "Backend unreachable. Using mock mode." };
+  }
 }

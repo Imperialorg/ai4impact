@@ -7,6 +7,7 @@ All LLM inference runs on cloud APIs — zero local model loading.
 
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -15,10 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 try:
-    # When run as `python -m uvicorn backend.main:app` from repo root
     from backend.swarm.graph import compile_graph, PulseState
 except ImportError:
-    # When run as `uvicorn main:app` from backend/
     from swarm.graph import compile_graph, PulseState
 
 # ---------------------------------------------------------------------------
@@ -130,8 +129,38 @@ async def trigger_analysis(payload: TriggerAnalysisRequest) -> DispatchResponse:
     Called by Dev 2's n8n workflow after a complaint is written to Pinecone.
 
     Pipeline: Cluster Check → Priority Scoring → Spatial Dispatch
+    Broadcasts intake, swarm log, and dispatch events to dashboard in real-time.
     """
     logger.info(f"Trigger received for event: {payload.event_id}")
+    ts = int(time.time() * 1000)
+
+    # ── 1. Broadcast intake event (complaint received) ────────────
+    await manager.broadcast({
+        "type": "intake_update",
+        "data": {
+            "id": f"intake-{payload.event_id}",
+            "channel": "portal",
+            "original_text": payload.translated_description,
+            "translated_text": payload.translated_description,
+            "timestamp": ts,
+            "coordinates": {
+                "lat": payload.coordinates.lat,
+                "lng": payload.coordinates.lng,
+            },
+        },
+    })
+
+    # ── 2. Broadcast swarm log: pipeline started ──────────────────
+    await manager.broadcast({
+        "type": "swarm_log",
+        "data": {
+            "id": f"log-{payload.event_id}-start",
+            "type": "system",
+            "message": f"Pipeline awakened for {payload.domain} event {payload.event_id[:12]}…",
+            "timestamp": ts,
+            "event_id": payload.event_id,
+        },
+    })
 
     # Build initial state for the LangGraph pipeline
     initial_state: PulseState = {
@@ -142,11 +171,13 @@ async def trigger_analysis(payload: TriggerAnalysisRequest) -> DispatchResponse:
         "cluster_found": False,
         "impact_score": 0,
         "severity_color": "#FFFF00",
+        "reasoning": "",
         "matched_officer": None,
     }
 
     # Invoke the compiled LangGraph pipeline
     final_state = await swarm_app.ainvoke(initial_state)
+    ts_after = int(time.time() * 1000)
 
     logger.info(
         f"Pipeline complete for {payload.event_id} | "
@@ -155,7 +186,49 @@ async def trigger_analysis(payload: TriggerAnalysisRequest) -> DispatchResponse:
         f"Officer: {final_state.get('matched_officer', {}).get('officer_id', 'N/A')}"
     )
 
-    # Format the dispatch payload
+    # ── 3. Broadcast swarm logs: auditor + priority + dispatch ────
+    await manager.broadcast({
+        "type": "swarm_log",
+        "data": {
+            "id": f"log-{payload.event_id}-audit",
+            "type": "analysis",
+            "message": (
+                f"Systemic Auditor: {'CLUSTER DETECTED — linked to existing pattern' if final_state['cluster_found'] else 'No cluster match. Isolated event.'}"
+            ),
+            "timestamp": ts_after,
+            "event_id": payload.event_id,
+        },
+    })
+
+    reasoning = final_state.get("reasoning", "")
+    await manager.broadcast({
+        "type": "swarm_log",
+        "data": {
+            "id": f"log-{payload.event_id}-priority",
+            "type": "analysis",
+            "message": (
+                f"Priority Agent: Score {final_state['impact_score']}/100 "
+                f"({final_state['severity_color']}). {reasoning}"
+            ),
+            "timestamp": ts_after + 1,
+            "event_id": payload.event_id,
+        },
+    })
+
+    officer = final_state.get("matched_officer") or {}
+    officer_id = officer.get("officer_id", "N/A")
+    await manager.broadcast({
+        "type": "swarm_log",
+        "data": {
+            "id": f"log-{payload.event_id}-dispatch",
+            "type": "dispatch",
+            "message": f"Dispatch Agent: Assigned {officer_id} → ({payload.coordinates.lat:.4f}, {payload.coordinates.lng:.4f})",
+            "timestamp": ts_after + 2,
+            "event_id": payload.event_id,
+        },
+    })
+
+    # ── 4. Broadcast NEW_DISPATCH (map update) ────────────────────
     dispatch_payload: dict[str, Any] = {
         "event_type": "NEW_DISPATCH",
         "data": {
@@ -166,14 +239,15 @@ async def trigger_analysis(payload: TriggerAnalysisRequest) -> DispatchResponse:
                 "severity_color": final_state["severity_color"],
                 "cluster_found": final_state["cluster_found"],
                 "coordinates": final_state["coordinates"],
+                "reasoning": reasoning,
+                "summary": payload.translated_description[:80],
             },
             "assigned_officer": final_state["matched_officer"],
         },
     }
 
-    # Broadcast to all connected dashboard clients
     await manager.broadcast(dispatch_payload)
-    logger.info(f"Broadcasted NEW_DISPATCH to {len(manager.active_connections)} clients.")
+    logger.info(f"Broadcasted 5 events to {len(manager.active_connections)} clients.")
 
     return DispatchResponse(**dispatch_payload)
 

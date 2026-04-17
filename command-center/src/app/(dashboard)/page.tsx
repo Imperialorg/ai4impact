@@ -5,11 +5,23 @@ import { MapLayer } from "@/components/MapLayer";
 import { IngestionFeed } from "@/components/IngestionFeed";
 import { SwarmLog } from "@/components/SwarmLog";
 import { usePulse } from "@/lib/pulse-context";
+import { triggerAnalysis } from "@/lib/socket";
 
 export default function DashboardPage() {
   const { events, logs, intake, status } = usePulse();
   const [stats, setStats] = useState({ active: 0, critical: 0, resolved: 0, avgTime: "—" });
   const [mobileTab, setMobileTab] = useState<"map" | "intake" | "swarm">("map");
+  const [triggering, setTriggering] = useState(false);
+  const [triggerMsg, setTriggerMsg] = useState("");
+
+  const handleTrigger = async () => {
+    setTriggering(true);
+    setTriggerMsg("");
+    const result = await triggerAnalysis();
+    setTriggerMsg(result.message);
+    setTriggering(false);
+    setTimeout(() => setTriggerMsg(""), 4000);
+  };
 
   useEffect(() => {
     const active = events.filter(e => e.status !== "RESOLVED").length;
@@ -60,6 +72,24 @@ export default function DashboardPage() {
           <StatPill label="Critical" value={stats.critical} color="var(--accent-crimson)" />
           <StatPill label="Resolved" value={stats.resolved} color="var(--accent-green)" />
           <StatPill label="Avg Response" value={stats.avgTime} color="var(--fg-secondary)" />
+          <button
+            onClick={handleTrigger}
+            disabled={triggering}
+            className="px-3 py-1 rounded-md text-[11px] font-medium transition-all"
+            style={{
+              background: triggering ? "var(--bg-surface)" : "var(--accent-blue-dim)",
+              color: triggering ? "var(--fg-muted)" : "var(--accent-blue)",
+              border: "1px solid",
+              borderColor: triggering ? "var(--border-light)" : "rgba(37,99,235,0.2)",
+            }}
+          >
+            {triggering ? "⏳ Firing…" : "⚡ Trigger Analysis"}
+          </button>
+          {triggerMsg && (
+            <span className="text-[10px] font-mono" style={{ color: "var(--fg-muted)" }}>
+              {triggerMsg}
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-2">
             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded"
               style={{
@@ -68,7 +98,7 @@ export default function DashboardPage() {
               }}>
               {status === "connected" ? "● LIVE" : status === "connecting" ? "◌ CONNECTING" : "◉ DEMO"}
             </span>
-            {(["Municipal", "Traffic", "Construction", "Emergency"] as const).map(d => {
+            {(["Municipal", "Traffic", "Water", "Electricity", "Construction", "Emergency"] as const).map(d => {
               const count = events.filter(e => e.domain === d && e.status !== "RESOLVED").length;
               return (
                 <span key={d} className="text-[10px] font-mono px-2 py-0.5 rounded"
