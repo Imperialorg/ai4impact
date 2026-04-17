@@ -51,9 +51,15 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
 
-/* Mapbox overrides */
-.mapboxgl-ctrl-attrib { display: none !important; }
-.mapboxgl-ctrl-logo { display: none !important; }
+/* Leaflet popup override */
+.leaflet-popup-content-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.leaflet-popup-tip { background: var(--bg-card); }
+.leaflet-popup-content { margin: 0; }
 
 /* Pulse animation for critical markers */
 @keyframes pulse-ring {
