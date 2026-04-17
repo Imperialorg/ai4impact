@@ -1,14 +1,40 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import type { PulseEvent } from "@/lib/types";
 
-// Leaflet types only — actual import is dynamic
-import type L from "leaflet";
+const HYDERABAD: [number, number] = [78.4867, 17.385]; // [lng, lat] for MapLibre
 
-const HYDERABAD: [number, number] = [17.385, 78.4867];
-const TILE_URL = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-const TILE_ATTR = '&copy; <a href="https://carto.com/">CARTO</a>';
+// CartoDB Positron via raster source in a MapLibre style — free, no API key
+const MAP_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    "carto-positron": {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+        "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+      ],
+      tileSize: 256,
+      attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: "carto-positron-layer",
+      type: "raster",
+      source: "carto-positron",
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
+  // Ensure type-compatibility
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+};
+
+type MapLibreType = typeof import("maplibre-gl");
 
 interface MapLayerProps {
   events: PulseEvent[];
@@ -16,115 +42,208 @@ interface MapLayerProps {
 
 export function MapLayer({ events }: MapLayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const leafletRef = useRef<typeof L | null>(null);
-  const eventMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
-  const officerMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
-  const linesRef = useRef<Map<string, L.Polyline>>(new Map());
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mlRef = useRef<MapLibreType | null>(null);
+  const readyRef = useRef(false);
+  const eventsRef = useRef<PulseEvent[]>(events);
+  eventsRef.current = events;
 
-  // Load Leaflet dynamically (SSR-safe)
+  const syncMarkers = useCallback(() => {
+    const map = mapRef.current;
+    const ml = mlRef.current;
+    if (!map || !ml || !readyRef.current) return;
+
+    const currentEvents = eventsRef.current;
+
+    // Build GeoJSON for event dots
+    const eventFeatures: GeoJSON.Feature[] = currentEvents.map((e) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [e.coordinates.lng, e.coordinates.lat] },
+      properties: {
+        id: e.event_id,
+        severity: e.severity,
+        color: e.severity_color,
+        summary: e.summary,
+        domain: e.domain,
+        status: e.status,
+        officer: e.assigned_officer?.officer_id ?? "",
+      },
+    }));
+
+    // Build GeoJSON for officer blips
+    const officerFeatures: GeoJSON.Feature[] = currentEvents
+      .filter((e) => e.assigned_officer)
+      .map((e) => ({
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [e.assigned_officer!.current_lng, e.assigned_officer!.current_lat],
+        },
+        properties: { id: e.event_id, officer_id: e.assigned_officer!.officer_id },
+      }));
+
+    // Build GeoJSON for dispatch lines
+    const lineFeatures: GeoJSON.Feature[] = currentEvents
+      .filter((e) => e.assigned_officer)
+      .map((e) => ({
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [e.assigned_officer!.current_lng, e.assigned_officer!.current_lat],
+            [e.coordinates.lng, e.coordinates.lat],
+          ],
+        },
+        properties: { id: e.event_id },
+      }));
+
+    const eventGeoJSON: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: eventFeatures };
+    const officerGeoJSON: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: officerFeatures };
+    const lineGeoJSON: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: lineFeatures };
+
+    // Update or create sources
+    const eventSrc = map.getSource("events") as maplibregl.GeoJSONSource | undefined;
+    if (eventSrc) {
+      eventSrc.setData(eventGeoJSON);
+    } else {
+      map.addSource("events", { type: "geojson", data: eventGeoJSON });
+      map.addLayer({
+        id: "events-circle",
+        type: "circle",
+        source: "events",
+        paint: {
+          "circle-radius": ["match", ["get", "severity"], "critical", 9, "high", 7, 5],
+          "circle-color": ["get", "color"],
+          "circle-opacity": 0.7,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": ["get", "color"],
+          "circle-stroke-opacity": 0.4,
+        },
+      });
+      // Pulsing halo for critical events
+      map.addLayer({
+        id: "events-critical-halo",
+        type: "circle",
+        source: "events",
+        filter: ["==", ["get", "severity"], "critical"],
+        paint: {
+          "circle-radius": 16,
+          "circle-color": "#dc2626",
+          "circle-opacity": 0.12,
+        },
+      });
+    }
+
+    const officerSrc = map.getSource("officers") as maplibregl.GeoJSONSource | undefined;
+    if (officerSrc) {
+      officerSrc.setData(officerGeoJSON);
+    } else {
+      map.addSource("officers", { type: "geojson", data: officerGeoJSON });
+      map.addLayer({
+        id: "officers-circle",
+        type: "circle",
+        source: "officers",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#2563eb",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#dbeafe",
+          "circle-opacity": 0.9,
+        },
+      });
+    }
+
+    const lineSrc = map.getSource("dispatch-lines") as maplibregl.GeoJSONSource | undefined;
+    if (lineSrc) {
+      lineSrc.setData(lineGeoJSON);
+    } else {
+      map.addSource("dispatch-lines", { type: "geojson", data: lineGeoJSON });
+      map.addLayer(
+        {
+          id: "dispatch-lines-layer",
+          type: "line",
+          source: "dispatch-lines",
+          paint: {
+            "line-color": "#2563eb",
+            "line-width": 1.5,
+            "line-opacity": 0.35,
+            "line-dasharray": [4, 6],
+          },
+        },
+        "events-circle" // below event dots
+      );
+    }
+  }, []);
+
+  // Initialize map
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     let cancelled = false;
 
     (async () => {
-      const leaflet = await import("leaflet");
-      await import("leaflet/dist/leaflet.css");
+      const ml = await import("maplibre-gl");
       if (cancelled || !containerRef.current) return;
+      mlRef.current = ml;
 
-      leafletRef.current = leaflet.default;
-      const Lf = leaflet.default;
-
-      const map = Lf.map(containerRef.current, {
+      const map = new ml.Map({
+        container: containerRef.current,
+        style: MAP_STYLE as maplibregl.StyleSpecification,
         center: HYDERABAD,
         zoom: 12,
-        zoomControl: false,
         attributionControl: false,
+        fadeDuration: 0,
       });
 
-      Lf.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19 }).addTo(map);
-      Lf.control.zoom({ position: "bottomright" }).addTo(map);
+      map.addControl(new ml.NavigationControl({ showCompass: false }), "bottom-right");
+      map.addControl(new ml.AttributionControl({ compact: true }), "bottom-left");
+
+      map.on("load", () => {
+        if (cancelled) return;
+        readyRef.current = true;
+        syncMarkers();
+      });
+
+      // Click popup for events
+      map.on("click", "events-circle", (e) => {
+        if (!e.features?.[0]) return;
+        const props = e.features[0].properties;
+        const coords = (e.features[0].geometry as GeoJSON.Point).coordinates.slice() as [number, number];
+
+        new ml.Popup({ offset: 12, closeButton: false, maxWidth: "220px" })
+          .setLngLat(coords)
+          .setHTML(
+            `<div style="font-family:system-ui;font-size:12px;">
+              <div style="font-weight:600;margin-bottom:4px;color:#1e1e1e;">${props.summary}</div>
+              <div style="color:#5c5856;font-size:10px;">${props.domain} · ${String(props.severity).toUpperCase()}</div>
+              ${props.officer ? `<div style="color:#2563eb;font-size:10px;margin-top:4px;">→ ${props.officer}</div>` : ""}
+            </div>`
+          )
+          .addTo(map);
+      });
+
+      map.on("mouseenter", "events-circle", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "events-circle", () => { map.getCanvas().style.cursor = ""; });
 
       mapRef.current = map;
 
-      const ro = new ResizeObserver(() => map.invalidateSize());
+      const ro = new ResizeObserver(() => map.resize());
       ro.observe(containerRef.current);
     })();
 
-    return () => { cancelled = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
-  }, []);
+    return () => {
+      cancelled = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        readyRef.current = false;
+      }
+    };
+  }, [syncMarkers]);
 
-  // Update markers
+  // Sync markers on events change
   useEffect(() => {
-    const map = mapRef.current;
-    const Lf = leafletRef.current;
-    if (!map || !Lf) return;
-
-    const activeIds = new Set(events.map(e => e.event_id));
-
-    eventMarkersRef.current.forEach((m, id) => {
-      if (!activeIds.has(id)) { m.remove(); eventMarkersRef.current.delete(id); }
-    });
-    officerMarkersRef.current.forEach((m, id) => {
-      if (!activeIds.has(id)) { m.remove(); officerMarkersRef.current.delete(id); }
-    });
-    linesRef.current.forEach((line, id) => {
-      if (!activeIds.has(id)) { line.remove(); linesRef.current.delete(id); }
-    });
-
-    events.forEach(event => {
-      const latlng: [number, number] = [event.coordinates.lat, event.coordinates.lng];
-
-      if (!eventMarkersRef.current.has(event.event_id)) {
-        const radius = event.severity === "critical" ? 9 : event.severity === "high" ? 7 : 5;
-        const marker = Lf.circleMarker(latlng, {
-          radius,
-          fillColor: event.severity_color,
-          color: event.severity_color,
-          weight: 2,
-          opacity: 0.8,
-          fillOpacity: 0.5,
-        }).addTo(map);
-
-        marker.bindPopup(`
-          <div style="font-family:system-ui;font-size:12px;min-width:160px;">
-            <div style="font-weight:600;margin-bottom:4px;color:#1e1e1e;">${event.summary}</div>
-            <div style="color:#5c5856;font-size:10px;">${event.domain} · ${event.severity.toUpperCase()}</div>
-            ${event.assigned_officer ? `<div style="color:#2563eb;font-size:10px;margin-top:4px;">→ ${event.assigned_officer.officer_id}</div>` : ""}
-          </div>
-        `);
-
-        eventMarkersRef.current.set(event.event_id, marker);
-      }
-
-      if (event.assigned_officer) {
-        const off = event.assigned_officer;
-        const offLatLng: [number, number] = [off.current_lat, off.current_lng];
-
-        if (!officerMarkersRef.current.has(event.event_id)) {
-          const offMarker = Lf.circleMarker(offLatLng, {
-            radius: 5,
-            fillColor: "#2563eb",
-            color: "#dbeafe",
-            weight: 2,
-            opacity: 1,
-            fillOpacity: 0.9,
-          }).addTo(map);
-          officerMarkersRef.current.set(event.event_id, offMarker);
-        }
-
-        if (!linesRef.current.has(event.event_id)) {
-          const line = Lf.polyline([offLatLng, latlng], {
-            color: "#2563eb",
-            weight: 1.5,
-            opacity: 0.35,
-            dashArray: "6, 8",
-          }).addTo(map);
-          linesRef.current.set(event.event_id, line);
-        }
-      }
-    });
-  }, [events]);
+    syncMarkers();
+  }, [events, syncMarkers]);
 
   return (
     <div ref={containerRef} className="w-full h-full rounded-lg overflow-hidden"

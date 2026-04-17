@@ -51,15 +51,18 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
 
-/* Leaflet popup override */
-.leaflet-popup-content-wrapper {
-  background: var(--bg-card);
+/* MapLibre GL popup override */
+.maplibregl-popup-content {
+  background: var(--bg-card) !important;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+  padding: 10px 12px !important;
 }
-.leaflet-popup-tip { background: var(--bg-card); }
-.leaflet-popup-content { margin: 0; }
+.maplibregl-popup-tip { border-top-color: var(--bg-card) !important; }
+.maplibregl-ctrl-attrib { font-size: 9px !important; opacity: 0.5; }
+.maplibregl-ctrl-group button { background: var(--bg-card) !important; border-color: var(--border) !important; }
+.maplibregl-ctrl-group button:hover { background: var(--bg-elevated) !important; }
 
 /* Pulse animation for critical markers */
 @keyframes pulse-ring {
