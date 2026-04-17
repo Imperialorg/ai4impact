@@ -102,6 +102,43 @@ export function MapLayer({ events }: MapLayerProps) {
     const lineGeoJSON: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: lineFeatures };
 
     // Update or create sources
+    // Heatmap source uses weight based on severity
+    const heatFeatures: GeoJSON.Feature[] = currentEvents.map((e) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [e.coordinates.lng, e.coordinates.lat] },
+      properties: {
+        weight: e.severity === "critical" ? 1.0 : e.severity === "high" ? 0.7 : 0.3,
+      },
+    }));
+    const heatGeoJSON: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: heatFeatures };
+
+    const heatSrc = map.getSource("heat") as maplibregl.GeoJSONSource | undefined;
+    if (heatSrc) {
+      heatSrc.setData(heatGeoJSON);
+    } else {
+      map.addSource("heat", { type: "geojson", data: heatGeoJSON });
+      map.addLayer({
+        id: "heat-layer",
+        type: "heatmap",
+        source: "heat",
+        paint: {
+          "heatmap-weight": ["get", "weight"],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 15, 2],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 10, 20, 15, 35],
+          "heatmap-color": [
+            "interpolate", ["linear"], ["heatmap-density"],
+            0, "rgba(0,0,0,0)",
+            0.2, "rgba(37,99,235,0.15)",
+            0.4, "rgba(37,99,235,0.3)",
+            0.6, "rgba(202,138,4,0.45)",
+            0.8, "rgba(220,38,38,0.55)",
+            1, "rgba(220,38,38,0.7)",
+          ],
+          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 12, 0.8, 16, 0.3],
+        },
+      });
+    }
+
     const eventSrc = map.getSource("events") as maplibregl.GeoJSONSource | undefined;
     if (eventSrc) {
       eventSrc.setData(eventGeoJSON);
