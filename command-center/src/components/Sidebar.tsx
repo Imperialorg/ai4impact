@@ -9,6 +9,7 @@ export function Sidebar() {
   const navItems = [
     { label: "Live Grid", icon: "◫", href: "/" },
     { label: "Agent Canvas", icon: "⧉", href: "/canvas" },
+    { label: "Knowledge Graph", icon: "◎", href: "/graph" },
     { label: "Reports", icon: "◔", href: "/reports" },
     { label: "Leaderboard", icon: "⊕", href: "/leaderboard" },
   ];
