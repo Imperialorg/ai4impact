@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { MapLayer } from "@/components/MapLayer";
 import { IngestionFeed } from "@/components/IngestionFeed";
 import { SwarmLog } from "@/components/SwarmLog";
-import { usePulseStream } from "@/lib/socket";
+import { usePulse } from "@/lib/pulse-context";
 
 export default function DashboardPage() {
-  const { events, logs, intake, status } = usePulseStream();
+  const { events, logs, intake, status } = usePulse();
   const [stats, setStats] = useState({ active: 0, critical: 0, resolved: 0, avgTime: "—" });
   const [mobileTab, setMobileTab] = useState<"map" | "intake" | "swarm">("map");
 

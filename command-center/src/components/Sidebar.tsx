@@ -1,11 +1,16 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
 export function Sidebar() {
+  const pathname = usePathname();
+
   const navItems = [
-    { label: "Live Grid", icon: "◫", active: true },
-    { label: "Intake Feed", icon: "◉" },
-    { label: "Swarm Log", icon: "⧉" },
-    { label: "Analytics", icon: "◔" },
-    { label: "Officers", icon: "⊕" },
-    { label: "Settings", icon: "⚙" },
+    { label: "Live Grid", icon: "◫", href: "/" },
+    { label: "Agent Canvas", icon: "⧉", href: "/canvas" },
+    { label: "Reports", icon: "◔", href: "/reports" },
+    { label: "Leaderboard", icon: "⊕", href: "/leaderboard" },
   ];
 
   return (
@@ -33,22 +38,26 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {navItems.map((item) => (
-          <button
-            key={item.label}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium transition-all"
-            style={{
-              background: item.active ? "var(--accent-blue-dim)" : "transparent",
-              color: item.active ? "var(--accent-blue)" : "var(--fg-secondary)",
-            }}
-          >
-            <span className="text-sm opacity-70">{item.icon}</span>
-            {item.label}
-            {item.active && (
-              <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent-blue)" }} />
-            )}
-          </button>
-        ))}
+        {navItems.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.label}
+              href={item.href}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium transition-all"
+              style={{
+                background: isActive ? "var(--accent-blue-dim)" : "transparent",
+                color: isActive ? "var(--accent-blue)" : "var(--fg-secondary)",
+              }}
+            >
+              <span className="text-sm opacity-70">{item.icon}</span>
+              {item.label}
+              {isActive && (
+                <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent-blue)" }} />
+              )}
+            </Link>
+          );
+        })}
       </nav>
 
       {/* System status */}
